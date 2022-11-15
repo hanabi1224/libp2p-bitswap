@@ -2,7 +2,7 @@ use crate::compat::{other, CompatMessage};
 use futures::future::BoxFuture;
 use futures::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use libp2p::core::{upgrade, InboundUpgrade, OutboundUpgrade, UpgradeInfo};
-use std::io;
+use std::{io, iter};
 
 // Undocumented, but according to JS we our messages have a max size of 512*1024
 // https://github.com/ipfs/js-ipfs-bitswap/blob/d8f80408aadab94c962f6b88f343eb9f39fa0fcc/src/decision-engine/index.js#L16
@@ -13,15 +13,10 @@ pub struct CompatProtocol;
 
 impl UpgradeInfo for CompatProtocol {
     type Info = &'static [u8];
-    type InfoIter = Vec<Self::Info>;
+    type InfoIter = iter::Once<Self::Info>;
 
     fn protocol_info(&self) -> Self::InfoIter {
-        // iter::once(b"/ipfs/bitswap/1.2.0")
-        vec![
-            b"/chain/ipfs/bitswap/1.0.0",
-            b"/chain/ipfs/bitswap/1.1.0",
-            b"/chain/ipfs/bitswap/1.2.0",
-        ]
+        iter::once(b"/chain/ipfs/bitswap/1.2.0")
     }
 }
 
@@ -47,15 +42,10 @@ where
 
 impl UpgradeInfo for CompatMessage {
     type Info = &'static [u8];
-    type InfoIter = Vec<Self::Info>;
+    type InfoIter = iter::Once<Self::Info>;
 
     fn protocol_info(&self) -> Self::InfoIter {
-        // iter::once(b"/ipfs/bitswap/1.2.0")
-        vec![
-            b"/chain/ipfs/bitswap/1.0.0",
-            b"/chain/ipfs/bitswap/1.1.0",
-            b"/chain/ipfs/bitswap/1.2.0",
-        ]
+        iter::once(b"/chain/ipfs/bitswap/1.2.0")
     }
 }
 
