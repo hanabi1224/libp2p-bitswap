@@ -23,9 +23,10 @@ use futures::{
 use libipld::{error::BlockNotFound, store::StoreParams, Block, Cid, Result};
 #[cfg(feature = "compat")]
 use libp2p::core::either::EitherOutput;
-use libp2p::core::{
-    connection::ConnectionId, transport::ListenerId, ConnectedPoint, Multiaddr, PeerId,
-};
+use libp2p::core::{connection::ConnectionId, Multiaddr, PeerId};
+use libp2p::swarm::derive_prelude::FromSwarm;
+#[cfg(feature = "compat")]
+use libp2p::swarm::derive_prelude::{ConnectionClosed, DialFailure, ListenFailure};
 #[cfg(feature = "compat")]
 use libp2p::swarm::{ConnectionHandlerSelect, NotifyHandler, OneShotHandler};
 use libp2p::{
@@ -33,13 +34,10 @@ use libp2p::{
         InboundFailure, OutboundFailure, ProtocolSupport, RequestId, RequestResponse,
         RequestResponseConfig, RequestResponseEvent, RequestResponseMessage, ResponseChannel,
     },
-    swarm::{
-        ConnectionHandler, DialError, IntoConnectionHandler, NetworkBehaviour,
-        NetworkBehaviourAction, PollParameters,
-    },
+    swarm::{ConnectionHandler, NetworkBehaviour, NetworkBehaviourAction, PollParameters},
 };
 use prometheus::Registry;
-use std::{error::Error, pin::Pin, time::Duration};
+use std::{pin::Pin, time::Duration};
 
 /// Bitswap response channel.
 pub type Channel = ResponseChannel<BitswapResponse>;
@@ -395,91 +393,78 @@ impl<P: StoreParams> NetworkBehaviour for Bitswap<P> {
         self.inner.addresses_of_peer(peer_id)
     }
 
-    fn inject_connection_established(
-        &mut self,
-        peer_id: &PeerId,
-        conn: &ConnectionId,
-        endpoint: &ConnectedPoint,
-        failed_addressses: Option<&Vec<Multiaddr>>,
-        other_established: usize,
-    ) {
-        self.inner.inject_connection_established(
-            peer_id,
-            conn,
-            endpoint,
-            failed_addressses,
-            other_established,
-        )
-    }
-
-    fn inject_connection_closed(
-        &mut self,
-        peer_id: &PeerId,
-        conn: &ConnectionId,
-        endpoint: &ConnectedPoint,
-        handler: <Self::ConnectionHandler as IntoConnectionHandler>::Handler,
-        remaining_established: usize,
-    ) {
+    fn on_swarm_event(&mut self, event: FromSwarm<Self::ConnectionHandler>) {
         #[cfg(feature = "compat")]
-        if remaining_established == 0 {
-            self.compat.remove(peer_id);
-        }
-        #[cfg(feature = "compat")]
-        let (req_res, _oneshot) = handler.into_inner();
-        #[cfg(not(feature = "compat"))]
-        let req_res = handler;
-        self.inner
-            .inject_connection_closed(peer_id, conn, endpoint, req_res, remaining_established)
+        let event = match event {
+            FromSwarm::ConnectionClosed(ConnectionClosed {
+                peer_id,
+                connection_id,
+                endpoint,
+                handler,
+                remaining_established,
+            }) => {
+                if remaining_established == 0 {
+                    self.compat.remove(&peer_id);
+                }
+                let (handler, _oneshot) = handler.into_inner();
+                FromSwarm::ConnectionClosed(ConnectionClosed {
+                    peer_id,
+                    connection_id,
+                    endpoint,
+                    handler,
+                    remaining_established,
+                })
+            }
+            FromSwarm::DialFailure(DialFailure {
+                peer_id,
+                handler,
+                error,
+            }) => {
+                let (handler, _oneshot) = handler.into_inner();
+                FromSwarm::DialFailure(DialFailure {
+                    peer_id,
+                    handler,
+                    error,
+                })
+            }
+            FromSwarm::ListenFailure(ListenFailure {
+                local_addr,
+                send_back_addr,
+                handler,
+            }) => {
+                let (handler, _oneshot) = handler.into_inner();
+                FromSwarm::ListenFailure(ListenFailure {
+                    local_addr,
+                    send_back_addr,
+                    handler,
+                })
+            }
+            FromSwarm::ConnectionEstablished(e) => FromSwarm::ConnectionEstablished(e),
+            FromSwarm::AddressChange(e) => FromSwarm::AddressChange(e),
+            FromSwarm::NewListener(e) => FromSwarm::NewListener(e),
+            FromSwarm::NewListenAddr(e) => FromSwarm::NewListenAddr(e),
+            FromSwarm::ExpiredListenAddr(e) => FromSwarm::ExpiredListenAddr(e),
+            FromSwarm::ListenerError(e) => FromSwarm::ListenerError(e),
+            FromSwarm::ListenerClosed(e) => FromSwarm::ListenerClosed(e),
+            FromSwarm::NewExternalAddr(e) => FromSwarm::NewExternalAddr(e),
+            FromSwarm::ExpiredExternalAddr(e) => FromSwarm::ExpiredExternalAddr(e),
+        };
+        self.inner.on_swarm_event(event)
     }
 
-    fn inject_dial_failure(
-        &mut self,
-        peer_id: Option<PeerId>,
-        handler: <Self::ConnectionHandler as IntoConnectionHandler>::Handler,
-        error: &DialError,
-    ) {
-        #[cfg(feature = "compat")]
-        let (req_res, _oneshot) = handler.into_inner();
-        #[cfg(not(feature = "compat"))]
-        let req_res = handler;
-        self.inner.inject_dial_failure(peer_id, req_res, error)
-    }
-
-    fn inject_new_listen_addr(&mut self, id: ListenerId, addr: &Multiaddr) {
-        self.inner.inject_new_listen_addr(id, addr)
-    }
-
-    fn inject_expired_listen_addr(&mut self, id: ListenerId, addr: &Multiaddr) {
-        self.inner.inject_expired_listen_addr(id, addr)
-    }
-
-    fn inject_new_external_addr(&mut self, addr: &Multiaddr) {
-        self.inner.inject_new_external_addr(addr)
-    }
-
-    fn inject_expired_external_addr(&mut self, addr: &Multiaddr) {
-        self.inner.inject_expired_external_addr(addr)
-    }
-
-    fn inject_listener_error(&mut self, id: ListenerId, err: &(dyn Error + 'static)) {
-        self.inner.inject_listener_error(id, err)
-    }
-
-    fn inject_listener_closed(&mut self, id: ListenerId, reason: Result<(), &std::io::Error>) {
-        self.inner.inject_listener_closed(id, reason)
-    }
-
-    fn inject_event(
+    fn on_connection_handler_event(
         &mut self,
         peer_id: PeerId,
         conn: ConnectionId,
         event: <Self::ConnectionHandler as ConnectionHandler>::OutEvent,
     ) {
         #[cfg(not(feature = "compat"))]
-        return self.inner.inject_event(peer_id, conn, event);
+        return self.inner.on_connection_handler_event(peer_id, conn, event);
         #[cfg(feature = "compat")]
         match event {
-            EitherOutput::First(event) => self.inner.inject_event(peer_id, conn, event),
+            EitherOutput::First(event) => {
+                self.inner.on_connection_handler_event(peer_id, conn, event)
+            }
             EitherOutput::Second(msg) => {
                 for msg in msg.0 {
                     match msg {
@@ -695,7 +680,7 @@ mod tests {
     use libp2p::identity;
     use libp2p::noise::{Keypair, NoiseConfig, X25519Spec};
     use libp2p::swarm::SwarmEvent;
-    use libp2p::tcp::{GenTcpConfig, TcpTransport};
+    use libp2p::tcp::{async_io::Transport as TcpTransport, Config as TcpConfig};
     use libp2p::yamux::YamuxConfig;
     use libp2p::{PeerId, Swarm, Transport};
     use std::sync::{Arc, Mutex};
@@ -716,7 +701,7 @@ mod tests {
             .unwrap();
         let noise = NoiseConfig::xx(dh_key).into_authenticated();
 
-        let transport = TcpTransport::new(GenTcpConfig::new().nodelay(true))
+        let transport = TcpTransport::new(TcpConfig::new().nodelay(true))
             .upgrade(libp2p::core::upgrade::Version::V1)
             .authenticate(noise)
             .multiplex(YamuxConfig::default())
@@ -773,7 +758,7 @@ mod tests {
         fn new() -> Self {
             let (peer_id, trans) = mk_transport();
             let store = Store::default();
-            let mut swarm = Swarm::new(
+            let mut swarm = Swarm::with_async_std_executor(
                 trans,
                 Bitswap::new(BitswapConfig::new(), store.clone()),
                 peer_id,
