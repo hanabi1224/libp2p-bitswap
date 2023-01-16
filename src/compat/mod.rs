@@ -1,5 +1,6 @@
 mod message;
 mod prefix;
+mod proto;
 mod protocol;
 
 pub use message::CompatMessage;

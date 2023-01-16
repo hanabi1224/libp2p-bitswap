@@ -10,10 +10,7 @@ repository = "https://github.com/ipfs-rust/libp2p-bitswap"
 [features]
 default = ["compat"]
 
-compat = ["prost", "prost-build"]
-
-[build-dependencies]
-prost-build = { version = "0.11", optional = true }
+compat = ["prost"]
 
 [dependencies]
 async-trait = "0.1.52"

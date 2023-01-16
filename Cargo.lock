@@ -1271,7 +1271,6 @@ dependencies = [
  "multihash",
  "prometheus",
  "prost",
- "prost-build",
  "thiserror",
  "tracing",
  "tracing-subscriber",
