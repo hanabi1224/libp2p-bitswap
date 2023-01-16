@@ -1,5 +1,8 @@
 use lazy_static::lazy_static;
-use prometheus::{HistogramOpts, HistogramVec, IntCounter, IntCounterVec, Opts};
+use prometheus::{
+    core::{AtomicU64, GenericGaugeVec},
+    HistogramOpts, HistogramVec, IntCounter, IntCounterVec, Opts,
+};
 
 lazy_static! {
     pub static ref REQUESTS_TOTAL: IntCounterVec = IntCounterVec::new(
@@ -83,4 +86,18 @@ lazy_static! {
         &["type"],
     )
     .unwrap();
+    pub static ref CONTAINER_CAPACITIES: GenericGaugeVec<AtomicU64> =
+        GenericGaugeVec::<AtomicU64>::new(
+            Opts::new(
+                "bitswap_container_capacities",
+                "Capacity for each container",
+            ),
+            &["type"],
+        )
+        .unwrap();
+}
+
+pub mod labels {
+    pub const REQUESTS: &str = "BITSWAP_REQUESTS";
+    pub const DB_QUERIES: &str = "BITSWAP_DB_QUERIES";
 }

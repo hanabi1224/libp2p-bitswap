@@ -176,6 +176,16 @@ impl<P: StoreParams> Bitswap<P> {
         if res {
             REQUESTS_CANCELED.inc();
         }
+        let mut keys_to_remove = vec![];
+        for (k, v) in self.requests.iter() {
+            if v == &id {
+                keys_to_remove.push(*k);
+            }
+        }
+        for k in keys_to_remove.iter() {
+            self.requests.remove(k);
+        }
+        self.track_capacities();
         res
     }
 
@@ -195,7 +205,17 @@ impl<P: StoreParams> Bitswap<P> {
         registry.register(Box::new(THROTTLED_OUTBOUND.clone()))?;
         registry.register(Box::new(OUTBOUND_FAILURE.clone()))?;
         registry.register(Box::new(INBOUND_FAILURE.clone()))?;
+        registry.register(Box::new(CONTAINER_CAPACITIES.clone()))?;
         Ok(())
+    }
+
+    fn track_capacities(&self) {
+        CONTAINER_CAPACITIES
+            .with_label_values(&[labels::REQUESTS])
+            .set(self.requests.capacity() as u64);
+        CONTAINER_CAPACITIES
+            .with_label_values(&[labels::DB_QUERIES])
+            .set(self.query_manager.queries_capacity() as u64);
     }
 }
 
@@ -280,6 +300,7 @@ impl<P: StoreParams> Bitswap<P> {
     /// Processes an incoming bitswap response.
     fn inject_response(&mut self, id: BitswapId, peer: PeerId, response: BitswapResponse) {
         if let Some(id) = self.requests.remove(&id) {
+            self.track_capacities();
             match response {
                 BitswapResponse::Have(have) => {
                     self.query_manager
@@ -565,6 +586,7 @@ impl<P: StoreParams> NetworkBehaviour for Bitswap<P> {
                             };
                             let rid = self.inner.send_request(&peer_id, req);
                             self.requests.insert(BitswapId::Bitswap(rid), id);
+                            self.track_capacities();
                         }
                         Request::Block(peer_id, cid) => {
                             let req = BitswapRequest {
@@ -573,6 +595,7 @@ impl<P: StoreParams> NetworkBehaviour for Bitswap<P> {
                             };
                             let rid = self.inner.send_request(&peer_id, req);
                             self.requests.insert(BitswapId::Bitswap(rid), id);
+                            self.track_capacities();
                         }
                         Request::MissingBlocks(cid) => {
                             self.db_tx
@@ -658,6 +681,7 @@ impl<P: StoreParams> NetworkBehaviour for Bitswap<P> {
                         if let OutboundFailure::UnsupportedProtocols = error {
                             if let Some(id) = self.requests.remove(&BitswapId::Bitswap(request_id))
                             {
+                                self.track_capacities();
                                 if let Some(info) = self.query_manager.query_info(id) {
                                     let ty = match info.label {
                                         "have" => RequestType::Have,
@@ -666,6 +690,7 @@ impl<P: StoreParams> NetworkBehaviour for Bitswap<P> {
                                     };
                                     let request = BitswapRequest { ty, cid: info.cid };
                                     self.requests.insert(BitswapId::Compat(info.cid), id);
+                                    self.track_capacities();
                                     return Poll::Ready(NetworkBehaviourAction::NotifyHandler {
                                         peer_id: peer,
                                         handler: NotifyHandler::Any,
@@ -678,6 +703,7 @@ impl<P: StoreParams> NetworkBehaviour for Bitswap<P> {
                             }
                         }
                         if let Some(id) = self.requests.remove(&BitswapId::Bitswap(request_id)) {
+                            self.track_capacities();
                             self.query_manager
                                 .inject_response(id, Response::Have(peer, false));
                         }

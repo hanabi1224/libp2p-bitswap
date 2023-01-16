@@ -499,6 +499,10 @@ impl QueryManager {
     pub fn next(&mut self) -> Option<QueryEvent> {
         self.events.pop_front()
     }
+
+    pub(crate) fn queries_capacity(&self) -> usize {
+        self.queries.capacity()
+    }
 }
 
 #[cfg(test)]
