@@ -13,8 +13,6 @@ use crate::protocol::{
 use crate::query::{QueryEvent, QueryId, QueryManager, Request, Response};
 use crate::stats::*;
 use fnv::FnvHashMap;
-#[cfg(feature = "compat")]
-use fnv::FnvHashSet;
 use futures::{
     channel::mpsc,
     stream::{Stream, StreamExt},
@@ -122,12 +120,9 @@ pub struct Bitswap<P: StoreParams> {
     db_tx: mpsc::UnboundedSender<DbRequest<P>>,
     /// Db response channel.
     db_rx: mpsc::UnboundedReceiver<DbResponse>,
-    /// Custom protocol name for go-bitswap compatible mode, default is [DEFAULT_COMPAT_PROTOCOL_NAME]
+    /// Custom protocol name for go-bitswap compatible mode, default is [crate::compat::DEFAULT_COMPAT_PROTOCOL_NAME]
     #[cfg(feature = "compat")]
     pub compat_protocol_name: &'static [u8],
-    /// Compat peers.
-    #[cfg(feature = "compat")]
-    compat: FnvHashSet<PeerId>,
 }
 
 impl<P: StoreParams> Bitswap<P> {
@@ -147,8 +142,6 @@ impl<P: StoreParams> Bitswap<P> {
             db_rx,
             #[cfg(feature = "compat")]
             compat_protocol_name: config.compat_protocol_name,
-            #[cfg(feature = "compat")]
-            compat: Default::default(),
         }
     }
 
@@ -431,10 +424,6 @@ impl<P: StoreParams> NetworkBehaviour for Bitswap<P> {
                 remaining_established,
             }) => {
                 #[cfg(feature = "compat")]
-                if remaining_established == 0 {
-                    self.compat.remove(&peer_id);
-                }
-                #[cfg(feature = "compat")]
                 let (handler, _oneshot) = handler.into_inner();
                 self.inner
                     .on_swarm_event(FromSwarm::ConnectionClosed(ConnectionClosed {
@@ -677,8 +666,6 @@ impl<P: StoreParams> NetworkBehaviour for Bitswap<P> {
                                     };
                                     let request = BitswapRequest { ty, cid: info.cid };
                                     self.requests.insert(BitswapId::Compat(info.cid), id);
-                                    tracing::trace!("adding compat peer {}", peer);
-                                    self.compat.insert(peer);
                                     return Poll::Ready(NetworkBehaviourAction::NotifyHandler {
                                         peer_id: peer,
                                         handler: NotifyHandler::Any,
